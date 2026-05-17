@@ -13,7 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 from zeus.configs import GMMConfig, InferenceMethodType, MetricType
 from zeus.wandb_logging import accumulate_batch_logs, log_epoch
-from inference_methods.simple_gmm import SimplifiedGMM
+from zeus.inference_methods.simple_gmm import SimplifiedGMM
 
 
 def hungarian_algorithm(A):
