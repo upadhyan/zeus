@@ -5,7 +5,6 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn import Module, TransformerEncoder
 
-from zeus.configs import LossType
 from zeus.model.layer import TransformerEncoderLayer
 from sklearn.preprocessing import MinMaxScaler
 
@@ -28,35 +27,26 @@ def bool_mask_to_att_mask(mask):
 
 
 class ZeusTransformerModel(nn.Module):
-    def __init__(self, encoder, n_out, ninp, nhead, nhid, nlayers,
-                 dropout=0.0, *, n_clusters=10, dist_based_logit=False,
-                 loss_type=LossType.CENTER, decoder=None,
+    def __init__(self, encoder, ninp, nhead, nhid, nlayers, *,
+                 dropout=0.0, n_clusters=10,
                  input_normalization=False, pre_norm=False,
                  activation='gelu', recompute_attn=False, full_attention=False,
                  all_layers_same_init=False, efficient_eval_masking=True):
         super().__init__()
         self.model_type = 'Transformer'
-        encoder_layer_creator = lambda: TransformerEncoderLayer(ninp, nhead, nhid, dropout, activation=activation,
-                                                                pre_norm=pre_norm, recompute_attn=recompute_attn)
-        self.transformer_encoder = TransformerEncoder(encoder_layer_creator(), nlayers)\
+        encoder_layer_creator = lambda: TransformerEncoderLayer(
+            ninp, nhead, nhid, dropout, activation=activation,
+            pre_norm=pre_norm, recompute_attn=recompute_attn,
+        )
+        self.transformer_encoder = TransformerEncoder(encoder_layer_creator(), nlayers) \
             if all_layers_same_init else TransformerEncoderDiffInit(encoder_layer_creator, nlayers)
         self.ninp = ninp
         self.encoder = encoder
-        self.distance_based_logit = dist_based_logit
-        self.loss_type = loss_type
-
-        if not self.distance_based_logit:
-            self.decoder = decoder(ninp, nhid, n_out) if decoder is not None \
-                else nn.Sequential(nn.Linear(ninp, nhid), nn.GELU(), nn.Linear(nhid, n_out))
-        else:
-            self.decoder = nn.Sequential(nn.Linear(ninp, nhid), nn.GELU())
-            self.out_layer = nn.Linear(nhid, n_out, bias=False)
 
         self.input_ln = SeqBN(ninp) if input_normalization else None
         self.efficient_eval_masking = efficient_eval_masking
         self.full_attention = full_attention
 
-        self.n_out = n_out
         self.nhid = nhid
 
         self.cluster_centers = nn.Parameter(torch.randn(n_clusters, 1, ninp))
@@ -86,32 +76,23 @@ class ZeusTransformerModel(nn.Module):
 
     def forward(self, x, *, k=0):
         x_src = self.encoder(x)
-        src_mask = None
 
-        if src_mask is None:
-            full_len = len(x_src) + len(self.cluster_centers)
-            if self.full_attention:
-                src_mask = bool_mask_to_att_mask(torch.ones((full_len, full_len), dtype=torch.bool)).to(x_src.device)
-            elif self.efficient_eval_masking:
-                src_mask = full_len
-            else:
-                src_mask = self.generate_D_q_matrix(full_len, 0).to(x_src.device)
+        full_len = len(x_src) + len(self.cluster_centers)
+        if self.full_attention:
+            src_mask = bool_mask_to_att_mask(
+                torch.ones((full_len, full_len), dtype=torch.bool)
+            ).to(x_src.device)
+        elif self.efficient_eval_masking:
+            src_mask = full_len
+        else:
+            src_mask = self.generate_D_q_matrix(full_len, 0).to(x_src.device)
 
         src = torch.cat([x_src, self.cluster_centers], 0)
 
         if self.input_ln is not None:
             src = self.input_ln(src)
 
-        output = self.transformer_encoder(src, src_mask)
-        if self.loss_type == LossType.CENTER:
-            return output
-
-        #output = self.decoder(output)
-#
-        #if self.distance_based_logit:
-        #    output = -torch.linalg.norm(output.unsqueeze(-1) - self.out_layer.weight.T, dim=-2)**2
-
-        return output
+        return self.transformer_encoder(src, src_mask)
 
     def predict_embedding(self, x, use_torch=True):
         x = x.unsqueeze(1)
