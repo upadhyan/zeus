@@ -6,6 +6,8 @@ __pycache__/
 # C extensions
 *.so
 
+zeus.pt
+
 # Distribution / packaging
 .Python
 build/

@@ -25,7 +25,7 @@ DEFAULT_RELEASE_URL = "https://github.com/upadhyan/zeus/releases/download/v0.1.0
 # TODO(release): fill in the SHA-256 of the released zeus.pt asset.
 # Until the release is cut, this is a placeholder that will fail any checksum
 # check — the test suite monkeypatches it.
-EXPECTED_SHA256 = "0" * 64
+EXPECTED_SHA256 = "eb60086459de338b1795ce2849e02e0d7e59cd95af43d01534dd84083f2b749b"
 
 _CHUNK = 1 << 20  # 1 MiB
 
