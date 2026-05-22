@@ -123,10 +123,14 @@ def _looks_like_state_dict(d: dict) -> bool:
 
 
 # The released checkpoint contains parameters for the upstream training-time
-# `decoder` and (optionally) `out_layer` modules, which this fork strips from
-# the model in Task 4. After loading with strict=False those keys show up as
-# UNEXPECTED keys (present in the checkpoint, absent from the model).
-_TOLERATED_UNEXPECTED_PREFIXES: tuple[str, ...] = ("decoder.", "out_layer.")
+# `decoder`, `out_layer`, and `cluster_embedding` modules, which this fork
+# strips from the model in Task 4. After loading with strict=False those keys
+# show up as UNEXPECTED keys (present in the checkpoint, absent from the model).
+_TOLERATED_UNEXPECTED_PREFIXES: tuple[str, ...] = (
+    "decoder.",
+    "out_layer.",
+    "cluster_embedding.",
+)
 
 
 def load_zeus_state_dict(model, path: Path, *, map_location) -> None:
