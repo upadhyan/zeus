@@ -1,9 +1,11 @@
 """Input preprocessing for the Zeus encoder.
 
 Converts ndarray / DataFrame / Tensor inputs into a (n, INPUT_DIM) float32
-tensor suitable for `Zeus.transform`, matching the per-block num/cat
-preprocessing the paper applies in `load_real_datasets` + `evaluate_model`
-(see spec docs/superpowers/specs/2026-05-23-paper-faithful-preprocessing-design.md).
+tensor suitable for `Zeus.transform`. Mirrors the per-block num/cat
+preprocessing described in
+`docs/superpowers/specs/2026-05-23-paper-faithful-preprocessing-design.md`
+(Section 2), which is itself derived from the paper's upstream
+`load_real_datasets` + `evaluate_model` (gmum/zeus repo — not in this fork).
 """
 from __future__ import annotations
 
@@ -50,12 +52,13 @@ def prepare_inputs(
     """
     # 1. Resolve num / cat split.
     # NOTE: DataFrame path uses dtype-based detection (_is_categorical_like
-    # matches object / pd.CategoricalDtype / bool). The paper's
-    # load_real_datasets uses OpenML's `categorical_indicator` metadata; these
-    # agree in practice because `dataset.get_data(dataset_format='dataframe')`
-    # round-trips OpenML categoricals as pandas `category` dtype. The OpenML
-    # regression test (tests/test_openml_regression.py) validates this
-    # equivalence empirically.
+    # matches object / pd.CategoricalDtype / bool).
+    # The upstream paper code (`load_real_datasets` in gmum/zeus) uses
+    # OpenML's `categorical_indicator` metadata instead, but these agree in
+    # practice because `dataset.get_data(dataset_format='dataframe')`
+    # round-trips OpenML categoricals as pandas `category` dtype. The
+    # OpenML regression test (tests/test_openml_regression.py, added in
+    # Chunk 6) validates this equivalence empirically.
     if isinstance(X, pd.DataFrame):
         cat_cols = [c for c in X.columns if _is_categorical_like(X[c].dtype)]
         num_cols = [c for c in X.columns if c not in cat_cols]
@@ -79,7 +82,8 @@ def prepare_inputs(
         frame = pd.DataFrame(arr.astype(np.float64))
         cat_cols, num_cols = cat_idx, num_idx
 
-    # 2. Per-block preprocessing (paper-faithful, datasets.py:340-352).
+    # 2. Per-block preprocessing (paper-faithful — see spec Section 5.2;
+    # mirrors the ColumnTransformer in upstream gmum/zeus `load_real_datasets`).
     transformers = []
     if num_cols:
         transformers.append(("num", Pipeline([
@@ -100,8 +104,8 @@ def prepare_inputs(
         mat = mat.toarray()
     mat = np.asarray(mat, dtype=np.float64)
 
-    # 3. PCA or zero-pad to model input dim — matches evaluate_model exactly
-    # (utils.py:138-146).
+    # 3. PCA or zero-pad to model input dim — see spec Section 5.2.
+    # Mirrors the dim-mismatch handling in upstream `evaluate_model`.
     d = mat.shape[1]
     if d > target_dim:
         mat = PCA(n_components=target_dim).fit_transform(mat)

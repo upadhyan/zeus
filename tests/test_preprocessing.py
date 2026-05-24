@@ -25,9 +25,10 @@ def test_numpy_small_dim_is_zero_padded_then_scaled():
     X = rng.normal(size=(15, 8)).astype(np.float32)
     out = prepare_inputs(X)
     assert out.shape == (15, c.INPUT_DIM)
-    # The padded columns (8..) before scaling are all zeros, but after MinMax
-    # to [-1, 1] columns with constant value should become -1 (sklearn default).
-    # Just check we didn't lose rows.
+    # Padded cols (8..) stay at exactly 0 (no blanket MinMax after pad —
+    # see prepare_inputs' `d < target_dim` branch). Numerical cols go
+    # through StandardScaler → MinMax(-1, 1), so output is finite.
+    assert (out[:, 8:] == 0).all()
     assert torch.isfinite(out).all()
 
 
