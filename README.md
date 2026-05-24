@@ -79,6 +79,108 @@ are honored verbatim.
 
 No `predict(X_new)` is provided — same context-dependence reason as `Zeus`.
 
+## Input preprocessing — what you might need to do yourself
+
+`paper_preprocess=True` (the default) covers most cases automatically:
+per-column mean imputation + `StandardScaler → MinMaxScaler(-1, 1)` for
+numerical columns, `most-frequent imputation → OneHotEncoder` for
+categoricals, then PCA-to-30 if the input is wider than 30 features or
+zero-pad to 30 if narrower. For a DataFrame with mixed dtypes you
+usually don't need to do anything else.
+
+A few cases where you DO need to do something:
+
+### 1. ndarray / Tensor inputs with categorical columns
+
+DataFrames have dtypes; ndarrays don't. Without dtype information every
+ndarray column is treated as numerical. If your ndarray has categorical
+columns, pass their indices explicitly:
+
+```python
+import numpy as np
+from zeus import ZeusClusterer
+
+X = np.column_stack([cont_1, cont_2, cat_1, cat_2])
+labels = ZeusClusterer(
+    n_clusters=3,
+    categorical_indices=[2, 3],     # column positions of the categoricals
+).fit_predict(X)
+```
+
+If you pass both a DataFrame and `categorical_indices=`, the kwarg is
+silently ignored — DataFrame dtypes win. This makes it safe to set the
+kwarg unconditionally when sweeping over heterogeneous inputs.
+
+### 2. OpenML metadata is sometimes wrong
+
+OpenML reports each column as numerical or categorical via
+`categorical_indicator`. This is sometimes wrong. For example,
+Heart-Statlog (`openml_id=53`) stores `sex`, `chest_pain_type`,
+`fasting_blood_sugar`, `resting_ecg`, `exercise_induced_angina`,
+`slope`, `num_major_vessels`, and `thal` as `uint8` columns and is
+marked **all-numerical** by OpenML — but those 8 are semantically
+categorical, and treating them as continuous tanks clustering quality
+(ARI ≈ 0.05 with Zeus on this dataset).
+
+Override OpenML's metadata with `categorical_indices=` via the ndarray
+entry point:
+
+```python
+import openml
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+from zeus import ZeusClusterer
+
+ds = openml.datasets.get_dataset(53, download_data=True)
+X, y, _, _ = ds.get_data(
+    dataset_format="dataframe",
+    target=ds.default_target_attribute,
+)
+y = LabelEncoder().fit_transform(y)
+
+# 8 uint8 columns that are semantically categorical
+cat_indices = [1, 2, 5, 6, 8, 10, 11, 12]
+
+labels = ZeusClusterer(
+    n_clusters=2,
+    categorical_indices=cat_indices,
+    random_state=42,
+).fit_predict(X.to_numpy())   # ndarray entry — DataFrame would ignore the kwarg
+```
+
+This brings Heart-Statlog from ARI ≈ 0.05 to ≈ 0.41. A quick heuristic
+for spotting cases like this: integer columns (especially `uint8`) with
+few unique values (say ≤ 10) are usually categorical regardless of what
+OpenML's `categorical_indicator` says.
+
+### 3. Wide / narrow inputs are handled automatically
+
+The model expects exactly 30 input features. With `paper_preprocess=True`:
+
+- `> 30` cols (after one-hot expansion): PCA to 30, then re-MinMax.
+- `< 30` cols: zero-pad to 30 (no re-MinMax — the model was trained on
+  data where padding columns are 0, not −1; preserving this is what
+  drives the iris/banknote ARI improvements over a naïve pipeline).
+- `== 30` cols: passed through as-is.
+
+You don't need to pre-PCA or pre-pad yourself.
+
+### 4. Pre-normalized inputs (`paper_preprocess=False`)
+
+If you've already done preprocessing externally and want Zeus to skip
+its pipeline entirely, pass `paper_preprocess=False`. The input must be
+a numeric `(n, 30)` ndarray/Tensor with values in roughly `[-1, 1]` —
+no auto-scaling, no auto-PCA, no auto-pad, no DataFrame support. Useful
+for reproducing legacy pipelines or when you want full control.
+
+### 5. Don't try `fit(X_train) → transform(X_test)`
+
+Embeddings are batch-context-dependent: every row attends to every
+other row in the same `transform` call. `fit(X_train).transform(X_test)`
+is NOT equivalent to `fit_transform(X_train ∪ X_test)`. Always run
+`fit_transform(X)` on the dataset you actually want to cluster, in one
+batch.
+
 ## Citation
 
 Please cite the original paper:
