@@ -38,7 +38,7 @@ probs = clf.probabilities_             # (n, 5)
 
 ## API reference
 
-### `zeus.Zeus(*, device="auto", preprocess=True, model_path=None, cache_dir=None)`
+### `zeus.Zeus(*, device="auto", categorical_indices=None, paper_preprocess=True, model_path=None, cache_dir=None)`
 
 sklearn `TransformerMixin`. Methods:
 
@@ -47,16 +47,21 @@ sklearn `TransformerMixin`. Methods:
 - `fit_transform(X)` — inherited; equivalent to `transform(X)`.
 
 Accepts `np.ndarray`, `pd.DataFrame`, or `torch.Tensor` of shape `(n, d)`.
-With `preprocess=True` (default), DataFrames with mixed dtypes are
-auto-encoded (one-hot for object/category/bool columns, mean-imputation
-for NaNs, PCA-or-zero-pad to dim 30, MinMax-scale to `[-1, 1]`). With
-`preprocess=False`, the input must already be a numeric `(n, 30)` array.
+With `paper_preprocess=True` (default), inputs go through the paper's
+per-block pipeline: `SimpleImputer→StandardScaler→MinMaxScaler(-1, 1)`
+for numerical columns, `SimpleImputer(most_frequent)→OneHotEncoder` for
+categoricals, then PCA-to-30 if too wide or zero-pad if too narrow.
+DataFrame inputs auto-detect categoricals from dtype; for ndarray/Tensor
+inputs, pass `categorical_indices=[i, j, ...]` listing the categorical
+column indices (otherwise all columns are treated as numerical). With
+`paper_preprocess=False`, the input must already be a numeric `(n, 30)`
+array.
 
 **Important:** embeddings depend on every other row in the batch. Calling
 `transform(X_test)` after `fit(X_train)` is **not** equivalent to running
 both at once — use `fit_transform(X)` on the dataset you want to embed.
 
-### `zeus.ZeusClusterer(n_clusters, *, method="kmeans", device="auto", preprocess=True, model_path=None, cache_dir=None, random_state=None, n_init=10)`
+### `zeus.ZeusClusterer(n_clusters, *, method="kmeans", device="auto", categorical_indices=None, paper_preprocess=True, model_path=None, cache_dir=None, random_state=None, n_init=None)`
 
 sklearn `ClusterMixin`. Methods:
 
@@ -66,6 +71,10 @@ sklearn `ClusterMixin`. Methods:
 Fitted attributes: `labels_`, `embedding_`, `cluster_centers_`, and
 (when `method != "kmeans"`) `probabilities_` with shape `(n, n_clusters)`
 summing to 1 per row.
+
+`n_init=None` resolves at fit-time to the paper-effective default for the
+chosen method: `kmeans→100`, `gmm→10`, `simple_gmm→10`. Explicit values
+are honored verbatim.
 
 No `predict(X_new)` is provided — same context-dependence reason as `Zeus`.
 
