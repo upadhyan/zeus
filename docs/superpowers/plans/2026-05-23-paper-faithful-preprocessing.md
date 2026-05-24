@@ -1032,7 +1032,9 @@ If any dataset regressed: stop and diagnose. The fix should monotonically improv
 
 - [ ] **Step 1: Open the file and fill the after-fix columns + footer**
 
-Use Edit to fill the `after_ari` and `after_nmi` cells for each row with the numbers from Task 5.1, and update the footer with `Date measured (after-fix): <today's date>`.
+Use Edit to fill the `after_ari` and `after_nmi` cells for each row with the numbers from Task 5.1, and update the footer with:
+- `Date measured (after-fix): <today's date>`
+- Re-check the sklearn version (`python -c "import sklearn; print(sklearn.__version__)"`) and update the footer entry. The 0.05 buffer in the Phase 5 regression test is sized for sklearn minor-version jitter; if the env changed between before-fix and after-fix runs, record it so any future regression debugging can compare like-for-like.
 
 ### Task 5.3: Commit
 
