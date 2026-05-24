@@ -15,6 +15,7 @@ the paper-faithful-preprocessing regression test
 
 - `ZeusClusterer(n_clusters=n_classes, method='kmeans', random_state=42)`
 - sklearn version: 1.5.2
+- openml version: 0.12.2
 - `zeus.pt` SHA-256: `eb60086459de338b1795ce2849e02e0d7e59cd95af43d01534dd84083f2b749b`
   (sourced from `zeus/weights.py::EXPECTED_SHA256`; `RELEASING.md` is untracked
   on `main` and did not carry over into this feature branch.)

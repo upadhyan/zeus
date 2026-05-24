@@ -13,10 +13,14 @@ def test_top_level_exports():
 
 
 def test_no_torch_train_imports_on_module_load():
-    """Importing zeus must not pull in wandb, openml, or omegaconf.
+    """`import zeus` should not pull in wandb, openml, or omegaconf.
 
-    Runs in a subprocess so sibling test modules that legitimately import
-    openml (e.g. test_openml_regression.py) don't taint sys.modules.
+    Runs in a subprocess to isolate from sys.modules pollution: when pytest
+    collects tests/test_openml_regression.py, that module imports openml at
+    module-load time, so by the time this test runs in the parent process
+    `openml in sys.modules` is True regardless of what `import zeus` did.
+    The subprocess gives us a clean interpreter where we can actually
+    observe zeus's import side-effects.
     """
     code = (
         "import sys; import zeus; "
@@ -28,6 +32,7 @@ def test_no_torch_train_imports_on_module_load():
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
+        timeout=30,
     )
     assert result.returncode == 0, (
         f"`import zeus` leaked forbidden modules: {result.stderr}"

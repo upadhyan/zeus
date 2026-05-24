@@ -11,7 +11,6 @@ No marker — runs in the default suite, offline.
 """
 from __future__ import annotations
 
-import numpy as np
 from sklearn.datasets import make_moons
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
