@@ -165,3 +165,6 @@ slurm-*.out
 
 # Local git worktrees (one per in-flight feature)
 .worktrees/
+
+# OpenML dataset cache (populated by tests/test_openml_regression.py)
+.openml_cache/
