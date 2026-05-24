@@ -53,9 +53,10 @@ for numerical columns, `SimpleImputer(most_frequent)→OneHotEncoder` for
 categoricals, then PCA-to-30 if too wide or zero-pad if too narrow.
 DataFrame inputs auto-detect categoricals from dtype; for ndarray/Tensor
 inputs, pass `categorical_indices=[i, j, ...]` listing the categorical
-column indices (otherwise all columns are treated as numerical). With
-`paper_preprocess=False`, the input must already be a numeric `(n, 30)`
-array.
+column indices (otherwise all columns are treated as numerical). If both
+a DataFrame and `categorical_indices=` are supplied, the kwarg is silently
+ignored and DataFrame dtypes win. With `paper_preprocess=False`, the input
+must already be a numeric `(n, 30)` array.
 
 **Important:** embeddings depend on every other row in the batch. Calling
 `transform(X_test)` after `fit(X_train)` is **not** equivalent to running

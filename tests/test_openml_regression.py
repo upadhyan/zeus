@@ -20,13 +20,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import openml
 import pandas as pd
 import pytest
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from sklearn.preprocessing import LabelEncoder
 
 from zeus import ZeusClusterer
+
+openml = pytest.importorskip("openml", reason="openml not installed; skipping openml regression tests")
 
 # Hermetic cache: lives inside the repo, gitignored.
 openml.config.cache_directory = str(Path(__file__).parent.parent / ".openml_cache")
