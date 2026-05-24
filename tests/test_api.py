@@ -166,7 +166,7 @@ def test_n_init_defaults_per_method(fake_checkpoint, small_df, monkeypatch):
     def fake_sgmm(*args, **kwargs):
         captured["sgmm_n_init"] = kwargs.get("n_init")
         return real_sgmm(*args, **kwargs)
-    monkeypatch.setattr("zeus.inference_methods.simple_gmm.SimplifiedGMM", fake_sgmm)
+    monkeypatch.setattr("zeus.api.SimplifiedGMM", fake_sgmm)
 
     # Default (None) → paper-faithful per method
     ZeusClusterer(n_clusters=3, method="kmeans",
@@ -190,3 +190,15 @@ def test_n_init_defaults_per_method(fake_checkpoint, small_df, monkeypatch):
                   model_path=fake_checkpoint, device="cpu",
                   random_state=0).fit(small_df)
     assert captured["gmm_n_init"] == 42
+
+    captured.clear()
+    ZeusClusterer(n_clusters=3, method="kmeans", n_init=7,
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["kmeans_n_init"] == 7
+
+    captured.clear()
+    ZeusClusterer(n_clusters=3, method="simple_gmm", n_init=3,
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["sgmm_n_init"] == 3

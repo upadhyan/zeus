@@ -15,6 +15,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.utils.validation import check_is_fitted
 
 from zeus import _config as c
+from zeus.inference_methods.simple_gmm import SimplifiedGMM
 from zeus.model.encoders import Linear
 from zeus.model.zeus import ZeusTransformerModel
 from zeus.preprocessing import passthrough_inputs, prepare_inputs
@@ -174,7 +175,6 @@ class ZeusClusterer(ClusterMixin, BaseEstimator):
             self.cluster_centers_ = gmm.means_
             self.probabilities_ = gmm.predict_proba(emb)
         elif self.method == "simple_gmm":
-            from zeus.inference_methods.simple_gmm import SimplifiedGMM
             sgmm = SimplifiedGMM(
                 n_components=self.n_clusters,
                 n_init=n_init,
