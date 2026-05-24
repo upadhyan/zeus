@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zeus"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Zero-shot Embeddings for Unsupervised Separation of tabular data"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7.0"]
+test = ["pytest>=7.0", "openml>=0.12"]
 
 [project.urls]
 Homepage = "https://github.com/upadhyan/zeus"
@@ -33,3 +33,6 @@ include = ["zeus*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "openml: end-to-end regression test that downloads OpenML datasets (network)",
+]

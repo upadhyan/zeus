@@ -9,5 +9,5 @@ upstream research codebase: https://github.com/gmum/zeus.
 """
 from zeus.api import Zeus, ZeusClusterer
 
-__version__ = "0.1.0"
+__version__ = "0.2.0.dev0"
 __all__ = ["Zeus", "ZeusClusterer", "__version__"]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.utils.validation import check_is_fitted
 
 from zeus import _config as c
+from zeus.inference_methods.simple_gmm import SimplifiedGMM
 from zeus.model.encoders import Linear
 from zeus.model.zeus import ZeusTransformerModel
 from zeus.preprocessing import passthrough_inputs, prepare_inputs
@@ -47,6 +48,9 @@ def _build_model() -> ZeusTransformerModel:
     )
 
 
+_PAPER_N_INIT = {"kmeans": 100, "gmm": 10, "simple_gmm": 10}
+
+
 class Zeus(TransformerMixin, BaseEstimator):
     """Zero-shot tabular encoder.
 
@@ -61,12 +65,14 @@ class Zeus(TransformerMixin, BaseEstimator):
         self,
         *,
         device: DeviceLike = "auto",
-        preprocess: bool = True,
+        categorical_indices: Optional[Sequence[int]] = None,
+        paper_preprocess: bool = True,
         model_path: Optional[Union[Path, str]] = None,
         cache_dir: Optional[Union[Path, str]] = None,
     ):
         self.device = device
-        self.preprocess = preprocess
+        self.categorical_indices = categorical_indices
+        self.paper_preprocess = paper_preprocess
         self.model_path = model_path
         self.cache_dir = cache_dir
 
@@ -93,8 +99,10 @@ class Zeus(TransformerMixin, BaseEstimator):
 
     def transform(self, X: ArrayLike) -> np.ndarray:
         self._ensure_model()
-        prep = prepare_inputs if self.preprocess else passthrough_inputs
-        x = prep(X)
+        if self.paper_preprocess:
+            x = prepare_inputs(X, categorical_indices=self.categorical_indices)
+        else:
+            x = passthrough_inputs(X)
         x = x.unsqueeze(1).to(self._device)
         with torch.no_grad():
             out = self._model(x)
@@ -118,16 +126,18 @@ class ZeusClusterer(ClusterMixin, BaseEstimator):
         *,
         method: Literal["kmeans", "gmm", "simple_gmm"] = "kmeans",
         device: DeviceLike = "auto",
-        preprocess: bool = True,
+        categorical_indices: Optional[Sequence[int]] = None,
+        paper_preprocess: bool = True,
         model_path: Optional[Union[Path, str]] = None,
         cache_dir: Optional[Union[Path, str]] = None,
         random_state: Optional[int] = None,
-        n_init: int = 10,
+        n_init: Optional[int] = None,
     ):
         self.n_clusters = n_clusters
         self.method = method
         self.device = device
-        self.preprocess = preprocess
+        self.categorical_indices = categorical_indices
+        self.paper_preprocess = paper_preprocess
         self.model_path = model_path
         self.cache_dir = cache_dir
         self.random_state = random_state
@@ -136,7 +146,8 @@ class ZeusClusterer(ClusterMixin, BaseEstimator):
     def fit(self, X, y=None):
         encoder = Zeus(
             device=self.device,
-            preprocess=self.preprocess,
+            categorical_indices=self.categorical_indices,
+            paper_preprocess=self.paper_preprocess,
             model_path=self.model_path,
             cache_dir=self.cache_dir,
         )
@@ -144,10 +155,12 @@ class ZeusClusterer(ClusterMixin, BaseEstimator):
         emb = MinMaxScaler(feature_range=(-1, 1)).fit_transform(emb)
         self.embedding_ = emb
 
+        n_init = self.n_init if self.n_init is not None else _PAPER_N_INIT[self.method]
+
         if self.method == "kmeans":
             km = KMeans(
                 n_clusters=self.n_clusters,
-                n_init=self.n_init,
+                n_init=n_init,
                 random_state=self.random_state,
             ).fit(emb)
             self.labels_ = km.labels_
@@ -155,17 +168,16 @@ class ZeusClusterer(ClusterMixin, BaseEstimator):
         elif self.method == "gmm":
             gmm = GaussianMixture(
                 n_components=self.n_clusters,
-                n_init=self.n_init,
+                n_init=n_init,
                 random_state=self.random_state,
             ).fit(emb)
             self.labels_ = gmm.predict(emb)
             self.cluster_centers_ = gmm.means_
             self.probabilities_ = gmm.predict_proba(emb)
         elif self.method == "simple_gmm":
-            from zeus.inference_methods.simple_gmm import SimplifiedGMM
             sgmm = SimplifiedGMM(
                 n_components=self.n_clusters,
-                n_init=self.n_init,
+                n_init=n_init,
                 random_state=self.random_state,
             ).fit(emb)
             self.labels_ = sgmm.predict(emb)

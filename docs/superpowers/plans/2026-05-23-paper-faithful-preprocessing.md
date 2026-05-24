@@ -1213,6 +1213,81 @@ envs) and the openml dep to the test extras. .openml_cache/ in
 .gitignore so the cache is repo-local but unversioned."
 ```
 
+### Task 6.6: Write the synthetic moons regression test
+
+**Files:** Create: `tests/test_synthetic_regression.py`
+
+The moons dataset is sklearn's classic non-convex 2-class toy: two interleaved half-circles in 2-D. A correctly-functioning Zeus encoder should pull the two moons apart in embedding space so that KMeans on the embeddings cleanly recovers the labels. User-specified target: **ARI > 0.9**.
+
+Why a separate file from the OpenML test:
+- Offline (no network) → not behind `@pytest.mark.openml`; runs in every `pytest tests/` invocation.
+- Synthetic → threshold is a hardcoded sanity floor (not derived from before/after-fix measurement).
+- Fast — under 5 seconds.
+
+- [ ] **Step 1: Write the test file**
+
+```python
+"""Synthetic-data regression test.
+
+Smoke check that Zeus + KMeans recovers labels on sklearn's moons
+dataset (2-D, 2 non-convex classes). Threshold (>0.9 ARI) is a
+hardcoded sanity floor specified by the project owner — Zeus is
+expected to handle this trivially after the paper-faithful preprocessing
+rewrite. If this regresses, something is wrong with the pipeline at a
+fundamental level.
+
+No marker — runs in the default suite, offline.
+"""
+from __future__ import annotations
+
+import numpy as np
+from sklearn.datasets import make_moons
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+
+from zeus import ZeusClusterer
+
+
+def test_moons_clustering_ari_above_threshold():
+    X, y = make_moons(n_samples=500, noise=0.05, random_state=42)
+    labels = ZeusClusterer(
+        n_clusters=2,
+        method="kmeans",
+        random_state=42,
+    ).fit_predict(X)
+    ari = adjusted_rand_score(y, labels)
+    nmi = normalized_mutual_info_score(y, labels)
+    print(f"[moons] ari={ari:.4f} nmi={nmi:.4f}")
+    assert ari > 0.9, (
+        f"ARI regression on moons: got {ari:.4f}, expected > 0.9. "
+        f"This is a fundamental sanity check; failing it means the "
+        f"pipeline is broken at the embedding or clustering layer."
+    )
+```
+
+- [ ] **Step 2: Run the moons test**
+
+Run: `pytest tests/test_synthetic_regression.py -v`
+Expected: PASS with ARI > 0.9 printed to stdout. First call will download the checkpoint if not yet cached (~30s on first run, then ~3s).
+
+- [ ] **Step 3: Run the full suite once more to confirm parity**
+
+Run: `pytest tests/ -v`
+Expected: all tests pass (synthetic + openml + unit).
+
+### Task 6.7: Commit Task 6.6
+
+- [ ] **Step 1: Stage and commit**
+
+```bash
+git -C /home/upadhyan/zeus add tests/test_synthetic_regression.py
+git -C /home/upadhyan/zeus commit -m "test: moons regression smoke (ARI > 0.9)
+
+Hardcoded sanity floor: Zeus + KMeans on sklearn make_moons (500 samples,
+noise=0.05, random_state=42) must produce ARI > 0.9. Offline, no marker,
+runs in the default pytest invocation. If this fails the pipeline is
+broken at a level the OpenML tests wouldn't even reach."
+```
+
 ---
 
 ## Chunk 7: Phase 6 — Documentation updates

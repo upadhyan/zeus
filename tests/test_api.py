@@ -72,11 +72,11 @@ def test_zeus_transform_accepts_ndarray(fake_checkpoint):
     assert emb.shape == (15, c.EMBED_DIM)
 
 
-def test_zeus_preprocess_false_requires_exact_dim(fake_checkpoint):
+def test_zeus_paper_preprocess_false_requires_exact_dim(fake_checkpoint):
     from zeus import Zeus
     bad = np.zeros((10, 20), dtype=np.float32)
     with pytest.raises(ValueError, match=r"expected \(n, 30\)"):
-        Zeus(model_path=fake_checkpoint, device="cpu", preprocess=False).transform(bad)
+        Zeus(model_path=fake_checkpoint, device="cpu", paper_preprocess=False).transform(bad)
 
 
 def test_clusterer_fit_predict_returns_labels(fake_checkpoint, small_df):
@@ -117,3 +117,88 @@ def test_clusterer_not_fitted_errors_on_probabilities(fake_checkpoint):
     )
     with pytest.raises((NotFittedError, AttributeError)):
         _ = clf.probabilities_
+
+
+def test_zeus_passes_categorical_indices_to_prepare_inputs(fake_checkpoint, monkeypatch):
+    """Zeus(categorical_indices=[...]).transform(arr) should route the indices
+    through to prepare_inputs."""
+    from zeus import Zeus
+    import zeus.api as api_mod
+
+    captured = {}
+
+    def fake_prepare(X, *, categorical_indices=None, target_dim=c.INPUT_DIM):
+        captured["categorical_indices"] = categorical_indices
+        return torch.zeros(X.shape[0], target_dim, dtype=torch.float32)
+
+    monkeypatch.setattr(api_mod, "prepare_inputs", fake_prepare)
+
+    arr = np.zeros((5, 3), dtype=np.float32)
+    Zeus(model_path=fake_checkpoint, device="cpu",
+         categorical_indices=[0, 2]).fit_transform(arr)
+    assert captured["categorical_indices"] == [0, 2]
+
+
+def test_n_init_defaults_per_method(fake_checkpoint, small_df, monkeypatch):
+    """When n_init is None (default), ZeusClusterer.fit must use the paper value
+    for the chosen method: kmeans 100, gmm 10, simple_gmm 10. Explicit override
+    honored verbatim."""
+    from zeus import ZeusClusterer
+    import sklearn.cluster
+    import sklearn.mixture
+    import zeus.inference_methods.simple_gmm as sgmm_mod
+
+    captured = {}
+
+    real_kmeans = sklearn.cluster.KMeans
+    def fake_kmeans(*args, **kwargs):
+        captured["kmeans_n_init"] = kwargs.get("n_init")
+        return real_kmeans(*args, **kwargs)
+    monkeypatch.setattr("zeus.api.KMeans", fake_kmeans)
+
+    real_gmm = sklearn.mixture.GaussianMixture
+    def fake_gmm(*args, **kwargs):
+        captured["gmm_n_init"] = kwargs.get("n_init")
+        return real_gmm(*args, **kwargs)
+    monkeypatch.setattr("zeus.api.GaussianMixture", fake_gmm)
+
+    real_sgmm = sgmm_mod.SimplifiedGMM
+    def fake_sgmm(*args, **kwargs):
+        captured["sgmm_n_init"] = kwargs.get("n_init")
+        return real_sgmm(*args, **kwargs)
+    monkeypatch.setattr("zeus.api.SimplifiedGMM", fake_sgmm)
+
+    # Default (None) → paper-faithful per method
+    ZeusClusterer(n_clusters=3, method="kmeans",
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["kmeans_n_init"] == 100
+
+    ZeusClusterer(n_clusters=3, method="gmm",
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["gmm_n_init"] == 10
+
+    ZeusClusterer(n_clusters=3, method="simple_gmm",
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["sgmm_n_init"] == 10
+
+    # Explicit override honored verbatim (no /10 divisor)
+    captured.clear()
+    ZeusClusterer(n_clusters=3, method="gmm", n_init=42,
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["gmm_n_init"] == 42
+
+    captured.clear()
+    ZeusClusterer(n_clusters=3, method="kmeans", n_init=7,
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["kmeans_n_init"] == 7
+
+    captured.clear()
+    ZeusClusterer(n_clusters=3, method="simple_gmm", n_init=3,
+                  model_path=fake_checkpoint, device="cpu",
+                  random_state=0).fit(small_df)
+    assert captured["sgmm_n_init"] == 3

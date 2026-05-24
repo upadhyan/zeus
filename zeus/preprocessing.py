@@ -1,18 +1,25 @@
 """Input preprocessing for the Zeus encoder.
 
 Converts ndarray / DataFrame / Tensor inputs into a (n, INPUT_DIM) float32
-tensor suitable for `Zeus.transform`. See spec §5.6.
+tensor suitable for `Zeus.transform`. Mirrors the per-block num/cat
+preprocessing described in
+`docs/superpowers/specs/2026-05-23-paper-faithful-preprocessing-design.md`
+(Section 2), which is itself derived from the paper's upstream
+`load_real_datasets` + `evaluate_model` (gmum/zeus repo — not in this fork).
 """
 from __future__ import annotations
 
-import warnings
-from typing import Union
+from typing import Sequence, Union
 
 import numpy as np
 import pandas as pd
 import torch
+from scipy.sparse import issparse
+from sklearn.compose import ColumnTransformer
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
 
 from zeus._config import INPUT_DIM
 
@@ -24,87 +31,99 @@ def _is_categorical_like(dt) -> bool:
     return dt == object or isinstance(dt, pd.CategoricalDtype) or pd.api.types.is_bool_dtype(dt)
 
 
-def _df_to_numeric_matrix(df: pd.DataFrame) -> np.ndarray:
-    cat_mask = df.dtypes.apply(_is_categorical_like)
-    cat_cols = list(df.columns[cat_mask])
-    num_cols = list(df.columns[~cat_mask])
+def prepare_inputs(
+    X: ArrayLike,
+    *,
+    categorical_indices: Sequence[int] | None = None,
+    target_dim: int = INPUT_DIM,
+) -> torch.Tensor:
+    """Convert `X` to a `(n, target_dim)` float32 tensor (paper-faithful pipeline).
 
-    parts = []
-    if num_cols:
-        nums = df[num_cols].astype(float)
-        # Per-column mean impute
-        col_means = nums.mean(axis=0, skipna=True)
-        nums = nums.fillna(col_means)
-        # If a column is entirely NaN, its mean is NaN; refuse explicitly
-        if nums.isna().any().any():
-            bad = nums.columns[nums.isna().any()].tolist()
-            raise ValueError(f"All-NaN column(s) cannot be imputed: {bad}")
-        parts.append(nums.to_numpy(dtype=np.float64))
-    if cat_cols:
-        ohe = pd.get_dummies(df[cat_cols], dummy_na=False)
-        parts.append(ohe.to_numpy(dtype=np.float64))
-    if not parts:
-        raise ValueError("Empty DataFrame; nothing to preprocess.")
-    return np.concatenate(parts, axis=1)
+    Per-block: numerical cols get SimpleImputer(mean) → StandardScaler →
+    MinMaxScaler(-1, 1); categorical cols get SimpleImputer(most_frequent) →
+    OneHotEncoder(handle_unknown='ignore'). Then PCA-to-target if too wide,
+    or zero-pad if too narrow. The `d == target_dim` branch is a deliberate
+    no-rescale to preserve OHE columns as {0, 1}.
 
-
-def _mean_impute_array(X: np.ndarray) -> np.ndarray:
-    if not np.isnan(X).any():
-        return X
-    warnings.warn(
-        "Input contains NaN values; mean-imputing per column. "
-        "Pass a DataFrame for explicit handling.",
-        stacklevel=3,
-    )
-    col_means = np.nanmean(X, axis=0)
-    if np.isnan(col_means).any():
-        bad = np.where(np.isnan(col_means))[0].tolist()
-        raise ValueError(f"All-NaN column index(es) cannot be imputed: {bad}")
-    inds = np.where(np.isnan(X))
-    X = X.copy()
-    X[inds] = np.take(col_means, inds[1])
-    return X
-
-
-def _adjust_dim(X: np.ndarray, target_dim: int) -> np.ndarray:
-    d = X.shape[1]
-    if d == target_dim:
-        return X
-    if d > target_dim:
-        return PCA(n_components=target_dim).fit_transform(X)
-    pad = np.zeros((X.shape[0], target_dim - d), dtype=X.dtype)
-    return np.concatenate([X, pad], axis=1)
-
-
-def prepare_inputs(X: ArrayLike, target_dim: int = INPUT_DIM) -> torch.Tensor:
-    """Convert `X` to a (n, target_dim) float32 tensor.
-
-    Order: DataFrame split + impute + one-hot, OR ndarray impute,
-    then PCA-or-pad, then MinMaxScale to [-1, 1].
-    Matches the existing `evaluate_model` pipeline (spec §5.6).
+    For DataFrame input, num/cat split is by dtype. For ndarray/Tensor input,
+    pass `categorical_indices=[...]` (column indices) or omit it to treat
+    every column as numerical. `categorical_indices` is silently ignored
+    when a DataFrame is passed (dtype wins).
     """
+    # 1. Resolve num / cat split.
+    # NOTE: DataFrame path uses dtype-based detection (_is_categorical_like
+    # matches object / pd.CategoricalDtype / bool).
+    # The upstream paper code (`load_real_datasets` in gmum/zeus) uses
+    # OpenML's `categorical_indicator` metadata instead, but these agree in
+    # practice because `dataset.get_data(dataset_format='dataframe')`
+    # round-trips OpenML categoricals as pandas `category` dtype. The
+    # OpenML regression test (tests/test_openml_regression.py, added in
+    # Chunk 6) validates this equivalence empirically.
     if isinstance(X, pd.DataFrame):
-        mat = _df_to_numeric_matrix(X)
-    elif isinstance(X, torch.Tensor):
-        mat = _mean_impute_array(X.detach().cpu().numpy().astype(np.float64))
-    elif isinstance(X, np.ndarray):
-        mat = _mean_impute_array(X.astype(np.float64))
+        cat_cols = [c for c in X.columns if _is_categorical_like(X[c].dtype)]
+        num_cols = [c for c in X.columns if c not in cat_cols]
+        frame = X
     else:
-        raise TypeError(f"Unsupported input type: {type(X).__name__}")
+        if isinstance(X, torch.Tensor):
+            arr = X.detach().cpu().numpy()
+        elif isinstance(X, np.ndarray):
+            arr = X
+        else:
+            raise TypeError(f"Unsupported input type: {type(X).__name__}")
+        if arr.ndim != 2:
+            raise ValueError(f"Expected 2-D input, got shape {arr.shape}")
+        n_features = arr.shape[1]
+        cat_idx = sorted(set(categorical_indices or []))
+        if cat_idx and (min(cat_idx) < 0 or max(cat_idx) >= n_features):
+            raise ValueError(
+                f"categorical_indices out of range for {n_features} features: {cat_idx}"
+            )
+        num_idx = [i for i in range(n_features) if i not in cat_idx]
+        frame = pd.DataFrame(arr.astype(np.float64))
+        cat_cols, num_cols = cat_idx, num_idx
 
-    if mat.ndim != 2:
-        raise ValueError(f"Expected 2-D input, got shape {mat.shape}")
+    # 2. Per-block preprocessing (paper-faithful — see spec Section 5.2;
+    # mirrors the ColumnTransformer in upstream gmum/zeus `load_real_datasets`).
+    transformers = []
+    if num_cols:
+        transformers.append(("num", Pipeline([
+            ("imp", SimpleImputer(strategy="mean")),
+            ("std", StandardScaler()),
+            ("mm",  MinMaxScaler(feature_range=(-1, 1))),
+        ]), num_cols))
+    if cat_cols:
+        transformers.append(("cat", Pipeline([
+            ("imp", SimpleImputer(strategy="most_frequent")),
+            # Match paper exactly: no sparse_output kwarg; convert below.
+            ("ohe", OneHotEncoder(handle_unknown="ignore")),
+        ]), cat_cols))
+    if not transformers:
+        raise ValueError("Empty input; nothing to preprocess.")
+    mat = ColumnTransformer(transformers).fit_transform(frame)
+    if issparse(mat):
+        mat = mat.toarray()
+    mat = np.asarray(mat, dtype=np.float64)
 
-    mat = _adjust_dim(mat, target_dim)
-    mat = MinMaxScaler(feature_range=(-1, 1)).fit_transform(mat)
+    # 3. PCA or zero-pad to model input dim — see spec Section 5.2.
+    # Mirrors the dim-mismatch handling in upstream `evaluate_model`.
+    d = mat.shape[1]
+    if d > target_dim:
+        mat = PCA(n_components=target_dim).fit_transform(mat)
+        mat = MinMaxScaler(feature_range=(-1, 1)).fit_transform(mat)
+    elif d < target_dim:
+        mat = np.hstack([mat, np.zeros((mat.shape[0], target_dim - d), dtype=mat.dtype)])
+    # else d == target_dim: leave alone. DO NOT re-MinMax here — that would
+    # remap one-hot columns from {0, 1} to {-1, +1}, which the model was
+    # never trained to see. This branch is load-bearing.
+
     return torch.tensor(mat, dtype=torch.float32)
 
 
 def passthrough_inputs(X: ArrayLike, target_dim: int = INPUT_DIM) -> torch.Tensor:
-    """Used when `preprocess=False`; rejects anything but a numeric (n, target_dim) array."""
+    """Used when `paper_preprocess=False`; rejects anything but a numeric (n, target_dim) array."""
     if isinstance(X, pd.DataFrame):
         raise ValueError(
-            "preprocess=False requires a numeric ndarray/Tensor; got DataFrame."
+            "paper_preprocess=False requires a numeric ndarray/Tensor; got DataFrame."
         )
     if isinstance(X, torch.Tensor):
         arr = X
